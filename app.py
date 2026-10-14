@@ -24,13 +24,40 @@ app.config.update(
 )
 
 CP_HOST = os.environ["CP_HOST"].rstrip("/")  # ex: https://vps.lomapv.com.br:2083
-CP_USER = os.environ["CP_USER"]
-CP_TOKEN = os.environ["CP_TOKEN"]
 APP_USER = os.environ["APP_USER"]
 APP_PASS = os.environ["APP_PASS"]
-ALLOWED_DOMAINS = {
-    d.strip().lower() for d in os.environ["ALLOWED_DOMAINS"].split(",") if d.strip()
-}
+
+
+def carregar_contas():
+    bruto = os.environ.get("ACCOUNTS", "").strip()
+    if bruto:
+        try:
+            dados = json.loads(bruto)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"ACCOUNTS não é um JSON válido: {e}")
+        contas = {}
+        for dominio, cred in dados.items():
+            if not isinstance(cred, dict) or not cred.get("user") or not cred.get("token"):
+                raise RuntimeError(f"ACCOUNTS: faltam 'user' ou 'token' em {dominio}")
+            contas[dominio.strip().lower()] = {
+                "user": cred["user"],
+                "token": cred["token"],
+            }
+        return contas
+    # compatibilidade com a configuração antiga (conta única)
+    user = os.environ["CP_USER"]
+    token = os.environ["CP_TOKEN"]
+    dominios = {
+        d.strip().lower()
+        for d in os.environ["ALLOWED_DOMAINS"].split(",")
+        if d.strip()
+    }
+    return {d: {"user": user, "token": token} for d in dominios}
+
+
+ACCOUNTS = carregar_contas()
+ALLOWED_DOMAINS = set(ACCOUNTS)
+
 VERIFY_TLS = os.environ.get("VERIFY_TLS", "true").lower() == "true"
 MAX_LINHAS = int(os.environ.get("MAX_LINHAS", "50"))
 
@@ -48,19 +75,25 @@ def gerar_senha(n=16):
 
 
 def criar_email(local, dominio, senha, quota):
-    r = requests.post(
-        f"{CP_HOST}/execute/Email/add_pop",
-        headers={"Authorization": f"cpanel {CP_USER}:{CP_TOKEN}"},
-        data={
-            "email": local,
-            "domain": dominio,
-            "password": senha,
-            "quota": quota,
-            "skip_update_db": 1,
-        },
-        timeout=30,
-        verify=VERIFY_TLS,
-    )
+    conta = ACCOUNTS[dominio]
+    try:
+        r = requests.post(
+            f"{CP_HOST}/execute/Email/add_pop",
+            headers={"Authorization": f"cpanel {conta['user']}:{conta['token']}"},
+            data={
+                "email": local,
+                "domain": dominio,
+                "password": senha,
+                "quota": quota,
+                "skip_update_db": 1,
+            },
+            timeout=30,
+            verify=VERIFY_TLS,
+        )
+    except requests.RequestException:
+        return False, "falha de conexão com o cPanel"
+    if r.status_code in (401, 403):
+        return False, "token inválido ou sem permissão para esta conta"
     try:
         d = r.json()
     except ValueError:
@@ -68,8 +101,7 @@ def criar_email(local, dominio, senha, quota):
     if d.get("status") == 1:
         return True, ""
     return False, "; ".join(d.get("errors") or ["erro desconhecido"])
-
-
+    
 @app.route("/healthz")
 def healthz():
     return "ok", 200
