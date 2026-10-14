@@ -1,0 +1,25 @@
+services:
+  email-manager:
+    build: .
+    restart: unless-stopped
+    # Sem "ports": o acesso externo é feito pelo Traefik do Dokploy (aba Domains).
+    expose:
+      - "5000"
+    environment:
+      CP_HOST: ${CP_HOST:?defina CP_HOST}
+      CP_USER: ${CP_USER:?defina CP_USER}
+      CP_TOKEN: ${CP_TOKEN:?defina CP_TOKEN}
+      APP_USER: ${APP_USER:?defina APP_USER}
+      APP_PASS: ${APP_PASS:?defina APP_PASS}
+      SECRET_KEY: ${SECRET_KEY:?defina SECRET_KEY}
+      ALLOWED_DOMAINS: ${ALLOWED_DOMAINS:?defina ALLOWED_DOMAINS}
+      VERIFY_TLS: ${VERIFY_TLS:-true}
+      MAX_LINHAS: ${MAX_LINHAS:-50}
+      COOKIE_SECURE: "true"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
