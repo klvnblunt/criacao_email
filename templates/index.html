@@ -121,7 +121,8 @@
 </header>
 
 <main>
-  <form class="card" method="post" id="form" autocomplete="off">
+  <form class="card" method="post" id="form" autocomplete="off"
+        data-max="{{ max_linhas | default(50) }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <textarea name="lista" id="lista" hidden></textarea>
 
@@ -210,12 +211,12 @@
 
 <script>
 (function () {
-  var MAX = {{ max_linhas | default(50) }};
   var RE = /^[a-z0-9._-]{1,64}$/;
 
   var rowsEl = document.getElementById('rows');
   var tpl = document.getElementById('row-tpl');
   var form = document.getElementById('form');
+  var MAX = parseInt(form.dataset.max, 10) || 50;
   var lista = document.getElementById('lista');
   var btn = document.getElementById('submit');
   var btnText = document.getElementById('submit-text');
