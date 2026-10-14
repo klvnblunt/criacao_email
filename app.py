@@ -3,6 +3,7 @@ import os
 import re
 import secrets
 import string
+import json
 
 import requests
 
@@ -101,7 +102,7 @@ def criar_email(local, dominio, senha, quota):
     if d.get("status") == 1:
         return True, ""
     return False, "; ".join(d.get("errors") or ["erro desconhecido"])
-    
+
 @app.route("/healthz")
 def healthz():
     return "ok", 200
