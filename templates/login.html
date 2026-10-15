@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Entrar · Criar e-mails</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --card:#ffffff; --text:#1c2333; --muted:#6b7385;
+    --border:#e2e6ef; --primary:#3b5bdb; --primary-hover:#2f4ac0;
+    --err-bg:#fdecee; --err:#b3202f; --code-bg:#f0f2f8;
+    --shadow:0 4px 24px rgba(28,35,51,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1320; --card:#171c2e; --text:#e8ebf5; --muted:#9aa3ba;
+      --border:#2a3150; --primary:#5c7cfa; --primary-hover:#748ffc;
+      --err-bg:#3a1820; --err:#ff8793; --code-bg:#1f2540;
+      --shadow:0 4px 24px rgba(0,0,0,.4);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5;
+       display:grid;place-items:center;padding:1rem}
+  .card{width:100%;max-width:380px;background:var(--card);border:1px solid var(--border);
+        border-radius:14px;box-shadow:var(--shadow);padding:2rem 1.6rem}
+  h1{margin:0;font-size:1.45rem;letter-spacing:-.01em}
+  .sub{margin:.3rem 0 1.5rem;color:var(--muted);font-size:.95rem}
+  label{display:block;font-weight:600;font-size:.9rem;margin-bottom:.3rem}
+  .field{margin-bottom:1.1rem}
+  input[type=text],input[type=password]{
+    width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);
+    border-radius:10px;padding:.8rem .85rem;font:inherit;font-size:1rem}
+  input:focus{outline:2px solid var(--primary);outline-offset:1px}
+  .pw{position:relative}
+  .pw input{padding-right:4.6rem}
+  .toggle{position:absolute;right:.4rem;top:50%;transform:translateY(-50%);
+          background:none;border:0;color:var(--muted);font:inherit;font-size:.85rem;
+          cursor:pointer;padding:.35rem .6rem;border-radius:8px}
+  .toggle:hover{color:var(--primary)}
+  .toggle:focus-visible,button.primary:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+  button.primary{width:100%;font:inherit;font-weight:600;cursor:pointer;color:#fff;
+                 background:var(--primary);border:1px solid var(--primary);
+                 border-radius:10px;padding:.8rem 1rem;margin-top:.3rem}
+  button.primary:hover:not(:disabled){background:var(--primary-hover)}
+  button.primary:disabled{opacity:.6;cursor:wait}
+  .erro{background:var(--err-bg);color:var(--err);border-radius:10px;
+        padding:.65rem .85rem;font-size:.9rem;margin-bottom:1.1rem}
+  .spinner{display:none;width:14px;height:14px;margin-right:.5rem;border:2px solid #fff;
+           border-top-color:transparent;border-radius:50%;vertical-align:-2px;
+           animation:spin .7s linear infinite}
+  .loading .spinner{display:inline-block}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion: reduce){.spinner{animation-duration:2s}}
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Criar contas de e-mail</h1>
+    <p class="sub">Entre para continuar.</p>
+
+    {% if erro %}<div class="erro" role="alert">{{ erro }}</div>{% endif %}
+
+    <form method="post" id="form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+
+      <div class="field">
+        <label for="usuario">Usuário</label>
+        <input type="text" id="usuario" name="usuario" required autofocus
+               autocomplete="username" autocapitalize="none" spellcheck="false">
+      </div>
+
+      <div class="field">
+        <label for="senha">Senha</label>
+        <div class="pw">
+          <input type="password" id="senha" name="senha" required
+                 autocomplete="current-password">
+          <button type="button" class="toggle" id="toggle" aria-pressed="false">Mostrar</button>
+        </div>
+      </div>
+
+      <button class="primary" type="submit" id="submit">
+        <span class="spinner"></span><span id="submit-text">Entrar</span>
+      </button>
+    </form>
+  </main>
+
+<script>
+(function () {
+  var senha = document.getElementById('senha');
+  var toggle = document.getElementById('toggle');
+  toggle.addEventListener('click', function () {
+    var mostrar = senha.type === 'password';
+    senha.type = mostrar ? 'text' : 'password';
+    toggle.textContent = mostrar ? 'Ocultar' : 'Mostrar';
+    toggle.setAttribute('aria-pressed', mostrar ? 'true' : 'false');
+  });
+
+  document.getElementById('form').addEventListener('submit', function () {
+    var btn = document.getElementById('submit');
+    btn.disabled = true;
+    btn.classList.add('loading');
+    document.getElementById('submit-text').textContent = 'Entrando...';
+  });
+
+  // voltar com o botão do navegador não deixa o botão travado
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted) {
+      var btn = document.getElementById('submit');
+      btn.disabled = false;
+      btn.classList.remove('loading');
+      document.getElementById('submit-text').textContent = 'Entrar';
+    }
+  });
+})();
+</script>
+</body>
+</html>

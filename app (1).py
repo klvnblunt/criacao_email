@@ -1,9 +1,11 @@
 import hmac
+import json
 import os
 import re
 import secrets
 import string
-import json
+import time
+from datetime import timedelta
 
 import requests
 
@@ -12,7 +14,8 @@ try:  # opcional: carrega o .env em desenvolvimento local
     load_dotenv()
 except ImportError:
     pass
-from flask import Flask, abort, render_template, request, session
+from flask import (Flask, abort, redirect, render_template, request, session,
+                   url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
@@ -22,11 +25,23 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Strict",
     SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "false").lower() == "true",
+    PERMANENT_SESSION_LIFETIME=timedelta(
+        hours=int(os.environ.get("SESSION_HORAS", "8"))
+    ),
 )
 
 CP_HOST = os.environ["CP_HOST"].rstrip("/")  # ex: https://vps.lomapv.com.br:2083
 APP_USER = os.environ["APP_USER"]
 APP_PASS = os.environ["APP_PASS"]
+VERIFY_TLS = os.environ.get("VERIFY_TLS", "true").lower() == "true"
+MAX_LINHAS = int(os.environ.get("MAX_LINHAS", "50"))
+
+LOCAL_RE = re.compile(r"^[a-z0-9._-]{1,64}$")
+
+# limite de tentativas de login (por IP, em memória de cada worker)
+MAX_FALHAS = 5
+JANELA_FALHAS = 600  # segundos
+FALHAS = {}
 
 
 def carregar_contas():
@@ -59,10 +74,10 @@ def carregar_contas():
 ACCOUNTS = carregar_contas()
 ALLOWED_DOMAINS = set(ACCOUNTS)
 
-VERIFY_TLS = os.environ.get("VERIFY_TLS", "true").lower() == "true"
-MAX_LINHAS = int(os.environ.get("MAX_LINHAS", "50"))
 
-LOCAL_RE = re.compile(r"^[a-z0-9._-]{1,64}$")
+def igual(a, b):
+    """Comparação em tempo constante, segura para qualquer texto (inclusive acentos)."""
+    return hmac.compare_digest((a or "").encode("utf-8"), (b or "").encode("utf-8"))
 
 
 def gerar_senha(n=16):
@@ -103,23 +118,45 @@ def criar_email(local, dominio, senha, quota):
         return True, ""
     return False, "; ".join(d.get("errors") or ["erro desconhecido"])
 
-@app.route("/healthz")
-def healthz():
-    return "ok", 200
+
+# ---------- proteção contra tentativas em excesso ----------
+def bloqueado(ip):
+    agora = time.time()
+    recentes = [t for t in FALHAS.get(ip, []) if agora - t < JANELA_FALHAS]
+    if recentes:
+        FALHAS[ip] = recentes
+    else:
+        FALHAS.pop(ip, None)
+    return len(recentes) >= MAX_FALHAS
+
+
+def registrar_falha(ip):
+    FALHAS.setdefault(ip, []).append(time.time())
+
+
+# ---------- sessão / CSRF ----------
+def garantir_csrf():
+    if "csrf" not in session:
+        session["csrf"] = secrets.token_urlsafe(32)
+    return session["csrf"]
+
+
+def checar_csrf():
+    token = session.get("csrf", "")
+    if not token or not igual(token, request.form.get("csrf", "")):
+        abort(400, "Sessão expirada ou formulário antigo. Recarregue a página e tente de novo.")
+
+
+ROTAS_ABERTAS = {"healthz", "login"}
 
 
 @app.before_request
 def exigir_login():
-    if request.path == "/healthz":
+    if request.endpoint in ROTAS_ABERTAS:
         return None
-    a = request.authorization
-    ok = (
-        a
-        and hmac.compare_digest(a.username or "", APP_USER)
-        and hmac.compare_digest(a.password or "", APP_PASS)
-    )
-    if not ok:
-        return ("Acesso negado", 401, {"WWW-Authenticate": 'Basic realm="Emails"'})
+    if not session.get("auth"):
+        return redirect(url_for("login"))
+    return None
 
 
 @app.after_request
@@ -130,13 +167,53 @@ def cabecalhos(resp):
     return resp
 
 
+@app.route("/healthz")
+def healthz():
+    return "ok", 200
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("auth"):
+        return redirect(url_for("index"))
+
+    erro = ""
+    status = 200
+    if request.method == "POST":
+        checar_csrf()
+        ip = request.remote_addr or "?"
+        if bloqueado(ip):
+            erro = "Muitas tentativas. Aguarde alguns minutos e tente de novo."
+            status = 429
+        else:
+            usuario_ok = igual(request.form.get("usuario", "").strip(), APP_USER)
+            senha_ok = igual(request.form.get("senha", ""), APP_PASS)
+            if usuario_ok and senha_ok:
+                FALHAS.pop(ip, None)
+                session.clear()
+                session["auth"] = True
+                session.permanent = True
+                garantir_csrf()
+                return redirect(url_for("index"))
+            registrar_falha(ip)
+            erro = "Usuário ou senha incorretos."
+            status = 401
+
+    return render_template("login.html", csrf=garantir_csrf(), erro=erro), status
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    checar_csrf()
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     resultados = []
     if request.method == "POST":
-        token = session.get("csrf", "")
-        if not token or not hmac.compare_digest(token, request.form.get("csrf", "")):
-            abort(400)
+        checar_csrf()
         try:
             quota = max(0, min(int(request.form.get("quota", "1024")), 102400))
         except ValueError:
@@ -170,12 +247,12 @@ def index():
                  "info": f"apenas as primeiras {MAX_LINHAS} linhas foram processadas"}
             )
 
-    session["csrf"] = secrets.token_urlsafe(32)
     return render_template(
         "index.html",
-        csrf=session["csrf"],
+        csrf=garantir_csrf(),
         resultados=resultados,
         dominios=sorted(ALLOWED_DOMAINS),
+        max_linhas=MAX_LINHAS,
     )
 
 
